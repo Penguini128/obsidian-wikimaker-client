@@ -7,6 +7,14 @@ If your plugin does not need CSS, delete this file.
 
 */
 
+.ribbon-full-sync-icon-pending, .ribbon-full-sync-icon-pending:hover {
+	color : var(--color-gray)
+}
+
+.ribbon-full-sync-icon-syncing, .ribbon-full-sync-icon-syncing:hover {
+	color : var(--color-cyan)
+}
+
 .wikimaker-status-bar-status-gray {
 	background-color : var(--color-gray);
 	font-weight : bold;

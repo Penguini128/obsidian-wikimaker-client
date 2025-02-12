@@ -1,32 +1,18 @@
-import {
-	App,
-	Editor,
-	MarkdownView,
-	Modal,
-	Notice,
-	Plugin,
-	PluginSettingTab,
-	requestUrl,
-	Setting, TFile
-} from 'obsidian';
-
+import { App, Notice, Plugin, PluginSettingTab, requestUrl, Setting, TFile } from 'obsidian';
 import moment from 'moment';
-
-// Remember to rename these classes and interfaces!
-
 
 interface WikiMakerPluginSettings {
 	wikiMakerServerURL: string;
 	wikiMakerServerSecret : string;
 }
 
+const REQUEST_TIMEOUT_MS = 2000
 const DEFAULT_SETTINGS: WikiMakerPluginSettings = {
 	wikiMakerServerURL: '',
 	wikiMakerServerSecret : ''
 }
 
-const REQUEST_TIMEOUT_MS = 2000
-
+// Make an HTTP request through the Obsidian interface, but have a timeout failsafe
 function fetchWithTimeout(url : string, secret : string , bodyContents : Record<string, string>, timeoutMs: number) {
 	return new Promise((resolve, reject) => {
 		const timeout = setTimeout(() => {
@@ -47,6 +33,7 @@ function fetchWithTimeout(url : string, secret : string , bodyContents : Record<
 	});
 }
 
+// Returns the TFile object of the current file, if the current file is a Markdown file, returning null otherwise
 function getCurrentMarkdownFile(): TFile | null {
 	const file = this.app.workspace.getActiveFile();
 	if (file && file.extension === "md") {
@@ -55,6 +42,7 @@ function getCurrentMarkdownFile(): TFile | null {
 	return null;
 }
 
+// Returns an array of string tags contained within the file
 async function getFileTags(file: TFile) : Promise<string[]> {
 	const metadata = this.app.metadataCache.getFileCache(file);
 	const frontmatterTags = metadata?.frontmatter?.tags || [];
@@ -77,12 +65,44 @@ async function getFileTags(file: TFile) : Promise<string[]> {
 	return allTags;
 }
 
-async function getCurrentFilePublishableStatus() : Promise<boolean> {
-	const file = getCurrentMarkdownFile()
+// Returns true if the passed file contains the '#wikimaker' tag and should be published
+async function filePublishableStatus(file: TFile | null): Promise<boolean> {
 	if (!file) return false
-	return getFileTags(file).then(tags => {
+	return await getFileTags(file).then(tags => {
 		return tags.includes('#wikimaker');
 	})
+}
+
+// Update the visuals of an HTML element
+function updateElement(element: HTMLElement, clears : string[], add : string, hoverText : string) : void {
+	element.addClass(add)
+	for (const clear of clears) {
+		element.removeClass(clear)
+	}
+	if (hoverText !== '') element.setAttr('aria-label', hoverText);
+}
+
+// Syncs the contents of a file with the WikiMaker server
+async function syncRequestBodyFromFile(file : TFile) {
+	const fileStats = await this.app.vault.adapter.stat(file.path)
+	const lastModified = moment(fileStats?.mtime).format('YYYY-MM-DD HH:mm:ss');
+	const markdown = await this.app.vault.read(file)
+	return {
+		"name": file.name,
+		"path": file.path,
+		"lastModified": lastModified,
+		"markdown": markdown
+	}
+}
+
+// Removes a published file from the WikiMaker server
+async function removePublishedFile(file: TFile | null) : Promise<unknown> {
+	if (!file) return new Promise<unknown>((resolve, reject) => {})
+	const requestBody = { name : file.name }
+	return await fetchWithTimeout(`${this.settings.wikiMakerServerURL}/remove-published-file`,
+		this.settings.wikiMakerServerSecret,
+		requestBody,
+		REQUEST_TIMEOUT_MS)
 }
 
 export default class WikiMakerClientPlugin extends Plugin {
@@ -91,41 +111,60 @@ export default class WikiMakerClientPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
+		// Ribbon element for display current server connection status
 		const serverStatusEl = this.addRibbonIcon('router', 'WikiMaker Server Status: Trying to connect...', (evt: MouseEvent) => {
 			new Notice('Attempting to connect to WikiMaker server...');
-			serverStatusEl.removeClass('ribbon-server-status-connected');
-			serverStatusEl.removeClass('ribbon-server-status-disconnected');
-			serverStatusEl.addClass('ribbon-server-status-trying');
-			attemptServerConnect()
-		});
-		serverStatusEl.addClass('ribbon-server-status-trying');
-
-		const attemptServerConnect = () => {
+			updateElement(serverStatusEl, ['ribbon-server-status-connected', 'ribbon-server-status-disconnected'], 'ribbon-server-status-trying', '')
 			fetchWithTimeout(`${this.settings.wikiMakerServerURL}/test-connection`, this.settings.wikiMakerServerSecret, {}, REQUEST_TIMEOUT_MS)
-			.then(response => {
-				// @ts-ignore
-				if (response.status === 200) {
-					serverStatusEl.removeClass('ribbon-server-status-trying');
-					serverStatusEl.addClass('ribbon-server-status-connected')
-					serverStatusEl.setAttr('aria-label', 'WikiMaker Server Status: Connected');
-					new Notice(`Connected to ${this.settings.wikiMakerServerURL}`)
-				} else {
-					serverStatusEl.removeClass('ribbon-server-status-trying');
-					serverStatusEl.addClass('ribbon-server-status-disconnected')
-					serverStatusEl.setAttr('aria-label', 'WikiMaker Server Status: Not connected');
-				}
-			})
-		}
-		attemptServerConnect()
-
-		const uploadConfigEl = this.addRibbonIcon('arrow-up-from-line', 'Upload WikiMaker Config Files', (evt : MouseEvent) => {
-			new Notice("Attempting to upload config files...")
-			fetchWithTimeout(this.settings.wikiMakerServerURL, this.settings.wikiMakerServerSecret, {}, REQUEST_TIMEOUT_MS)
 				.then(response => {
 					// @ts-ignore
 					if (response.status === 200) {
-						new Notice('Upload success!')
+						updateElement(serverStatusEl, ['ribbon-server-status-trying'], 'ribbon-server-status-connected', 'WikiMaker Server Status: Connected')
+						new Notice(`Connected to ${this.settings.wikiMakerServerURL}`)
+					} else {
+						updateElement(serverStatusEl, ['ribbon-server-status-trying'], 'ribbon-server-status-disconnected', 'WikiMaker Server Status: Not connected')
+						new Notice(`Unable to connect to ${this.settings.wikiMakerServerURL}`)
+					}
+				})
+		});
+		serverStatusEl.addClass('ribbon-server-status-trying');
+		serverStatusEl.click()
+
+		const fullSyncRibbonEl = this.addRibbonIcon('refresh-ccw', 'Sync Vault with WikiMaker', (evt : MouseEvent) => {
+			new Notice("Syncing vault with WikiMaker server...")
+			updateElement(fullSyncRibbonEl, ['ribbon-full-sync-icon-pending'], 'ribbon-full-sync-icon-syncing', 'WikiMaker vault sync in progress...')
+			fetchWithTimeout(`${this.settings.wikiMakerServerURL}/reset-published-pages`, this.settings.wikiMakerServerSecret, {}, REQUEST_TIMEOUT_MS)
+			.then(async response => {
+				// @ts-ignore
+				if (response.status === 200) {
+					const files = this.app.vault.getFiles();
+					for (const file of files) {
+						if (file.extension === "md" && await filePublishableStatus(file)) {
+							if (!file) return;
+							await fetchWithTimeout(`${this.settings.wikiMakerServerURL}/sync-published-file`,
+								this.settings.wikiMakerServerSecret,
+								await syncRequestBodyFromFile(file),
+								REQUEST_TIMEOUT_MS)
+						}
+					}
+					await updateSyncStatusElement()
+					new Notice('Sync complete')
+					updateElement(fullSyncRibbonEl, ['ribbon-full-sync-icon-syncing'], 'ribbon-full-sync-icon-pending', 'Sync Vault with WikiMaker')
+				} else {
+					new Notice('Sync failed. Please try again.')
+					updateElement(fullSyncRibbonEl, ['ribbon-full-sync-icon-syncing'], 'ribbon-full-sync-icon-pending', 'Sync Vault with WikiMaker')
+				}
+			})
+		})
+		fullSyncRibbonEl.addClass('ribbon-full-sync-icon-pending')
+
+		const uploadConfigEl = this.addRibbonIcon('arrow-up-from-line', 'Upload WikiMaker Config Files', (evt : MouseEvent) => {
+			new Notice("Attempting to upload config files...")
+			fetchWithTimeout(`${this.settings.wikiMakerServerURL}/test-connection`, this.settings.wikiMakerServerSecret, {}, REQUEST_TIMEOUT_MS)
+				.then(response => {
+					// @ts-ignore
+					if (response.status === 200) {
+						new Notice('Upload success! (Placeholder)')
 					} else {
 						new Notice('Upload failed. Check server status')
 					}
@@ -134,95 +173,50 @@ export default class WikiMakerClientPlugin extends Plugin {
 
 		const wikimakerPublishStatusEl = this.addStatusBarItem();
 		wikimakerPublishStatusEl.setText("WikiMaker")
-		wikimakerPublishStatusEl.setAttr('aria-label', 'Open Markdown File to view WikiMaker status (click to refresh)');
-		wikimakerPublishStatusEl.addClass('wikimaker-status-bar-status-gray');
-		wikimakerPublishStatusEl.onClickEvent(async () => {
-			if (!await updatePublishElement()) {
-				const file = getCurrentMarkdownFile()
-				if (!file) return
-				const requestBody = {
-					name : file.name
-				}
-				fetchWithTimeout(`${this.settings.wikiMakerServerURL}/remove-published-file`,
-				this.settings.wikiMakerServerSecret,
-				requestBody,
-				REQUEST_TIMEOUT_MS)
-				.then(response => {
-					// @ts-ignore
-					if (response.status === 200) {
-						new Notice('Successfully unpublished file')
-					}
-				})
-			}
-			new Notice('Refreshed WikiMaker publish status')
-		})
+		updateElement(wikimakerPublishStatusEl, [], 'wikimaker-status-bar-status-gray', 'Open Markdown File to view WikiMaker status')
 
 		const wikimakerSyncStatusEl = this.addStatusBarItem();
 		wikimakerSyncStatusEl.hide()
 		wikimakerSyncStatusEl.setText("Pending...")
-		wikimakerSyncStatusEl.setAttr('aria-label', 'WikiMaker Sync Status (click to sync)');
-		wikimakerSyncStatusEl.addClass('wikimaker-status-bar-status-gray');
+		updateElement(wikimakerSyncStatusEl, [], 'wikimaker-status-bar-status-gray', 'WikiMaker Sync Status (click to sync)')
 		wikimakerSyncStatusEl.onClickEvent(async () => {
 			const file = getCurrentMarkdownFile();
 			if (!file) return;
-			const fileStats = await this.app.vault.adapter.stat(file.path)
-			const lastModified = moment(fileStats?.mtime).format('YYYY-MM-DD HH:mm:ss');
-			const markdown = await this.app.vault.read(file)
-			const requestBody = {
-				"name" : file.name,
-				"path" : file.path,
-				"lastModified" : lastModified,
-				"markdown" : markdown
-			}
 			fetchWithTimeout(`${this.settings.wikiMakerServerURL}/sync-published-file`,
 				this.settings.wikiMakerServerSecret,
-				requestBody,
+				await syncRequestBodyFromFile(file),
 				REQUEST_TIMEOUT_MS)
-				.then(response => {
-					// @ts-ignore
-					if (response.status === 200) {
-						new Notice('Successfully published file')
-						wikimakerSyncStatusEl.setText('Synced');
-						wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-red')
-						wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-gray')
-						wikimakerSyncStatusEl.addClass('wikimaker-status-bar-status-green');
-					}
-				})
+			.then(response => {
+				// @ts-ignore
+				if (response.status === 200) {
+					new Notice('Successfully published file')
+					wikimakerSyncStatusEl.setText('Synced');
+					updateElement(wikimakerSyncStatusEl, ['wikimaker-status-bar-status-red', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-green', 'WikiMaker Sync Status (click to sync)')
+				// @ts-ignore
+				} else if (response.json.configFileFailsafe) {
+					new Notice('Cannot publish WikiMaker website config files')
+				}
+			})
 		})
 
 
 		const updatePublishElement = async () => {
-			return await getCurrentFilePublishableStatus()
+			return await filePublishableStatus(getCurrentMarkdownFile())
 				.then(publishable => {
 					if (publishable) {
-						wikimakerPublishStatusEl.setAttr('aria-label', 'Published to WikiMaker');
-						wikimakerPublishStatusEl.removeClass('wikimaker-status-bar-status-red')
-						wikimakerPublishStatusEl.removeClass('wikimaker-status-bar-status-gray')
-						wikimakerPublishStatusEl.addClass('wikimaker-status-bar-status-green');
+						updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-red', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-green', 'Published to WikiMaker')
 						wikimakerSyncStatusEl.show()
-						updateSyncElement()
+						updateSyncStatusElement()
 					} else {
-						wikimakerPublishStatusEl.setAttr('aria-label', 'Not published to WikiMaker');
-						wikimakerPublishStatusEl.removeClass('wikimaker-status-bar-status-green')
-						wikimakerPublishStatusEl.removeClass('wikimaker-status-bar-status-gray')
-						wikimakerPublishStatusEl.addClass('wikimaker-status-bar-status-red');
+						updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-green', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-red', 'Not published to WikiMaker')
 						wikimakerSyncStatusEl.hide()
-
-						const file = getCurrentMarkdownFile()
-						if (!file) return
-						const requestBody = {
-							name : file.name
-						}
-						fetchWithTimeout(`${this.settings.wikiMakerServerURL}/remove-published-file`,
-						this.settings.wikiMakerServerSecret,
-						requestBody,
-						REQUEST_TIMEOUT_MS)
+						removePublishedFile(getCurrentMarkdownFile())
 					}
 					return publishable
 				})
 		}
 
-		const updateSyncElement = async () => {
+		const updateSyncStatusElement = async () => {
 			const file = getCurrentMarkdownFile();
 			if (!file) return;
 			const fileStats = await this.app.vault.adapter.stat(file.path)
@@ -243,14 +237,10 @@ export default class WikiMakerClientPlugin extends Plugin {
 					const json : Record = response.json
 					if (json.syncStatus) {
 						wikimakerSyncStatusEl.setText('Synced');
-						wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-red')
-						wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-gray')
-						wikimakerSyncStatusEl.addClass('wikimaker-status-bar-status-green');
+						updateElement(wikimakerSyncStatusEl, ['wikimaker-status-bar-status-red', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-green', '')
 					} else {
 						wikimakerSyncStatusEl.setText('Not Synced');
-						wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-green')
-						wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-gray')
-						wikimakerSyncStatusEl.addClass('wikimaker-status-bar-status-red');
+						updateElement(wikimakerSyncStatusEl, ['wikimaker-status-bar-status-green', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-red', '')
 					}
 				}
 			})
@@ -258,65 +248,24 @@ export default class WikiMakerClientPlugin extends Plugin {
 
 		this.app.vault.on('modify', () => {
 			updatePublishElement()
-
 			wikimakerSyncStatusEl.setText('Not Synced');
-			wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-green')
-			wikimakerSyncStatusEl.removeClass('wikimaker-status-bar-status-gray')
-			wikimakerSyncStatusEl.addClass('wikimaker-status-bar-status-red');
+			updateElement(wikimakerSyncStatusEl, ['wikimaker-status-bar-status-green', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-red', '')
 		});
 
-
-		await updatePublishElement()
+		if (getCurrentMarkdownFile()) {
+			await updatePublishElement()
+		}
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", async (leaf) => {
 				if (leaf && leaf.view && leaf.view.getViewType() === "markdown") {
 					await updatePublishElement()
 				} else if (leaf?.view?.getViewType() !== "file-explorer") {
-					wikimakerPublishStatusEl.setAttr('aria-label', 'Open Markdown File to view WikiMaker status');
-					wikimakerPublishStatusEl.removeClass('wikimaker-status-bar-status-green')
-					wikimakerPublishStatusEl.removeClass('wikimaker-status-bar-status-red')
-					wikimakerPublishStatusEl.addClass('wikimaker-status-bar-status-gray');
+					updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-green', 'wikimaker-status-bar-status-red'], 'wikimaker-status-bar-status-gray', 'Open Markdown File to view WikiMaker status')
 					wikimakerSyncStatusEl.hide()
 				}
 			})
 		);
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new SampleSettingTab(this.app, this));
@@ -344,22 +293,8 @@ export default class WikiMakerClientPlugin extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
+// Plugin settings configuration
 class SampleSettingTab extends PluginSettingTab {
 	plugin: WikiMakerClientPlugin;
 
@@ -372,7 +307,6 @@ class SampleSettingTab extends PluginSettingTab {
 		const {containerEl} = this;
 
 		containerEl.empty();
-
 
 		new Setting(containerEl)
 			.setName('WikiMaker Server URL')
@@ -395,6 +329,7 @@ class SampleSettingTab extends PluginSettingTab {
 					this.plugin.settings.wikiMakerServerSecret = value;
 					await this.plugin.saveSettings();
 				}));
+
 
 	}
 }
