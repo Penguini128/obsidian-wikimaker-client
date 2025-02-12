@@ -1,0 +1,53 @@
+/*
+
+This CSS file will be included with your plugin, and
+available in the app when your plugin is enabled.
+
+If your plugin does not need CSS, delete this file.
+
+*/
+
+.wikimaker-status-bar-status-gray {
+	background-color : var(--color-gray);
+	font-weight : bold;
+}
+
+.wikimaker-status-bar-status-gray:hover {
+	color : var(--color-gray);
+	background-color : var(--interactive-hover);
+}
+
+.wikimaker-status-bar-status-red {
+	background-color : var(--color-red);
+	font-weight : bold;
+	color : var(--interactive-normal);
+}
+
+.wikimaker-status-bar-status-red:hover {
+	color : var(--color-red);
+	background-color : var(--interactive-hover);
+}
+
+.wikimaker-status-bar-status-green {
+	background-color : var(--color-green);
+	font-weight : bold;
+	color : var(--interactive-normal);
+}
+
+.wikimaker-status-bar-status-green:hover {
+	color : var(--color-green);
+	background-color : var(--interactive-hover);
+}
+
+.ribbon-server-status-trying, .ribbon-server-status-trying:hover {
+	color : var(--color-yellow)
+}
+
+.ribbon-server-status-disconnected, .ribbon-server-status-disconnected:hover {
+	color : var(--color-red)
+}
+
+.ribbon-server-status-connected, .ribbon-server-status-connected:hover {
+	color : var(--color-green)
+}
+
