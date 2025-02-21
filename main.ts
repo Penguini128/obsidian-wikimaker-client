@@ -95,16 +95,6 @@ async function syncRequestBodyFromFile(file : TFile) {
 	}
 }
 
-// Removes a published file from the WikiMaker server
-async function removePublishedFile(file: TFile | null) : Promise<unknown> {
-	if (!file) return new Promise<unknown>((resolve, reject) => {})
-	const requestBody = { name : file.name }
-	return await fetchWithTimeout(`${this.settings.wikiMakerServerURL}/remove-published-file`,
-		this.settings.wikiMakerServerSecret,
-		requestBody,
-		REQUEST_TIMEOUT_MS)
-}
-
 export default class WikiMakerClientPlugin extends Plugin {
 	settings: WikiMakerPluginSettings;
 
@@ -201,19 +191,22 @@ export default class WikiMakerClientPlugin extends Plugin {
 
 
 		const updatePublishElement = async () => {
-			return await filePublishableStatus(getCurrentMarkdownFile())
-				.then(publishable => {
-					if (publishable) {
-						updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-red', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-green', 'Published to WikiMaker')
-						wikimakerSyncStatusEl.show()
-						updateSyncStatusElement()
-					} else {
-						updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-green', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-red', 'Not published to WikiMaker')
-						wikimakerSyncStatusEl.hide()
-						removePublishedFile(getCurrentMarkdownFile())
-					}
-					return publishable
-				})
+			const file = getCurrentMarkdownFile()
+			if (!file) return false;
+			const publishable = await filePublishableStatus(file)
+			if (publishable) {
+				updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-red', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-green', 'Published to WikiMaker')
+				wikimakerSyncStatusEl.show()
+				await updateSyncStatusElement()
+			} else {
+				updateElement(wikimakerPublishStatusEl, ['wikimaker-status-bar-status-green', 'wikimaker-status-bar-status-gray'], 'wikimaker-status-bar-status-red', 'Not published to WikiMaker')
+				wikimakerSyncStatusEl.hide()
+				await fetchWithTimeout(`${this.settings.wikiMakerServerURL}/remove-published-file`,
+					this.settings.wikiMakerServerSecret,
+					{name: file.name},
+					REQUEST_TIMEOUT_MS)
+			}
+			return publishable
 		}
 
 		const updateSyncStatusElement = async () => {
@@ -245,7 +238,6 @@ export default class WikiMakerClientPlugin extends Plugin {
 				}
 			})
 		}
-
 		this.app.vault.on('modify', () => {
 			updatePublishElement()
 			wikimakerSyncStatusEl.setText('Not Synced');
