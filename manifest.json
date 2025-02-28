@@ -3,7 +3,7 @@
 	"name": "Obsidian WikiMaker Client",
 	"version": "0.1.0 Beta",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
+	"description": "Client-side plugin to manage files on your Obsidian WikiMaker wiki",
 	"author": "Obsidian",
 	"authorUrl": "https://obsidian.md",
 	"fundingUrl": "https://obsidian.md/pricing",
