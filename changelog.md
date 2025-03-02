@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.2.1 Beta
+- Added compiled plugin to repo
+
 ## Version 0.2.0 Beta
 - Large amounts of refactoring and project restructuring
 - Markdown to JSON conversion is now handled client side
