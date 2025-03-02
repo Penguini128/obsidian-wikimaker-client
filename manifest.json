@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-wikimaker-client",
 	"name": "Obsidian WikiMaker Client",
-	"version": "0.1.0 Beta",
+	"version": "0.2.1 Beta",
 	"minAppVersion": "0.15.0",
 	"description": "Client-side plugin to manage files on your Obsidian WikiMaker wiki",
 	"author": "Obsidian",
