@@ -463,23 +463,33 @@ function inlineHyperlinkContent(string) {
 }
 
 function internalImageContent(string) {
-	const imageFileName = string.substring(3, string.length - 2).trim()
+	const imageContents = string.substring(3, string.length - 2).trim()
+	const imageParts = imageContents.split('|')
+	const imageFileName = imageParts[0]
+	const imageSize = imageParts.length > 1 ? imageParts[1].split('x') : undefined
 
 	return {
-		'filename' : imageFileName
+		'filename' : imageFileName,
+		'width': imageSize[0] !== undefined ? imageSize[0] + 'px': undefined,
+		'height': imageSize[0] !== undefined && imageSize.length > 1 ? imageSize[1] + 'px' : undefined,
 	}
 }
 
 function imageLinkContent(imageMarkdown) {
     const imageTextPattern = /(?<=\[).*?(?=])/
     const imageUrlPattern = /(?<=\().*?(?=\))/
-    let imageText = imageMarkdown.match(imageTextPattern)
-    imageText = imageText[0].replace('\\<', '<').replace('\\[', '[')
+    let imageParts = imageMarkdown.match(imageTextPattern)[0].split('|')
     let imageUrl = imageMarkdown.match(imageUrlPattern)[0].split(' ')[0]
+
+	const imageText = imageParts[0].replace('\\<', '<').replace('\\[', '[')
+	const imageSize = imageParts.length > 1 ? imageParts[1].split('x') : undefined
+
     if (imageUrl && imageText) {
         return {
             'text' : imageText,
-            'url' : imageUrl.trim()
+            'url' : imageUrl.trim(),
+			'width': imageSize[0] !== undefined ? imageSize[0] + 'px': undefined,
+			'height': imageSize[0] !== undefined && imageSize.length > 1 ? imageSize[1] + 'px' : undefined,
         }
     }
 }

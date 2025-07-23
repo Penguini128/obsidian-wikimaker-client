@@ -28,7 +28,6 @@ export async function imageToRequestBody(image : TFile, plugin : WikiMakerClient
 	const lastModified = moment(imageStats?.mtime).format('YYYY-MM-DD HH:mm:ss');
 	const arrayBuffer = await plugin.app.vault.readBinary(image)
 	const base64Image = arrayBufferToBase64(arrayBuffer)
-
 	const jsonFilePath = image.path.replace(/\.md$/, '.json')
 	const jsonFileName = image.name.replace(/\.md$/, '.json')
 	return {
