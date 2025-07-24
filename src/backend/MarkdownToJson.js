@@ -464,7 +464,7 @@ function inlineHyperlinkContent(string) {
 
 function internalImageContent(string) {
 	const imageContents = string.substring(3, string.length - 2).trim()
-	const imageParts = imageContents.split('|')
+	const imageParts = imageContents.replace('\\|', '|').split('|')
 	const imageFileName = imageParts[0]
 	const imageSize = imageParts.length > 1 ? imageParts[1].split('x') : undefined
 
@@ -478,7 +478,7 @@ function internalImageContent(string) {
 function imageLinkContent(imageMarkdown) {
     const imageTextPattern = /(?<=\[).*?(?=])/
     const imageUrlPattern = /(?<=\().*?(?=\))/
-    let imageParts = imageMarkdown.match(imageTextPattern)[0].split('|')
+    let imageParts = imageMarkdown.match(imageTextPattern)[0].replace('\\|', '|').split('|')
     let imageUrl = imageMarkdown.match(imageUrlPattern)[0].split(' ')[0]
 
 	const imageText = imageParts[0].replace('\\<', '<').replace('\\[', '[')
