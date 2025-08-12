@@ -1,27 +1,28 @@
 import {
 	blockQuote,
 	bold,
+	codeBlock,
 	h1,
 	h2,
 	h3,
 	h4,
 	h5,
 	h6,
+	hyperlink,
+	imageLink,
 	inlineBreak,
 	inlineCode,
+	inlineHyperlink,
+	internalImage,
 	italic,
 	newLine,
 	orderedList,
 	plainText,
 	regularLine,
 	strikethrough,
-	unorderedList,
 	table,
-	codeBlock,
-	hyperlink,
-	wikilink,
-	imageLink,
-	inlineHyperlink, internalImage
+	unorderedList,
+	wikilink
 } from "./MarkdownRegex";
 import {Notice} from "obsidian";
 
@@ -392,7 +393,7 @@ function discoverInlineElements(htmlElement) {
 function findInlines(string) {
 	const stringConsumer = newStringConsumer(string)
 	const newInlines = []
-	const finalPassInlines = [hyperlink, wikilink, imageLink, inlineHyperlink, internalImage]
+	const finalPassInlines = [imageLink, hyperlink, wikilink, inlineHyperlink, internalImage]
 
 	let allFound = false
 	while (!allFound) {
@@ -464,18 +465,22 @@ function inlineHyperlinkContent(string) {
 
 function internalImageContent(string) {
 	const imageContents = string.substring(3, string.length - 2).trim()
+
 	const imageParts = imageContents.replace('\\|', '|').split('|')
 	const imageFileName = imageParts[0]
 	const imageSize = imageParts.length > 1 ? imageParts[1].split('x') : undefined
 
 	return {
-		'filename' : imageFileName,
-		'width': imageSize[0] !== undefined ? imageSize[0] + 'px': undefined,
-		'height': imageSize[0] !== undefined && imageSize.length > 1 ? imageSize[1] + 'px' : undefined,
+		'filename': imageFileName,
+		'width': imageSize !== undefined ? imageSize[0] + 'px' : undefined,
+		'height': imageSize !== undefined && imageSize.length > 1 ? imageSize[1] + 'px' : undefined,
 	}
 }
 
 function imageLinkContent(imageMarkdown) {
+
+    new Notice("hello!")
+
     const imageTextPattern = /(?<=\[).*?(?=])/
     const imageUrlPattern = /(?<=\().*?(?=\))/
     let imageParts = imageMarkdown.match(imageTextPattern)[0].replace('\\|', '|').split('|')
@@ -488,8 +493,8 @@ function imageLinkContent(imageMarkdown) {
         return {
             'text' : imageText,
             'url' : imageUrl.trim(),
-			'width': imageSize[0] !== undefined ? imageSize[0] + 'px': undefined,
-			'height': imageSize[0] !== undefined && imageSize.length > 1 ? imageSize[1] + 'px' : undefined,
+			'width': imageSize !== undefined ? imageSize[0] + 'px': undefined,
+			'height': imageSize !== undefined && imageSize.length > 1 ? imageSize[1] + 'px' : undefined,
         }
     }
 }
